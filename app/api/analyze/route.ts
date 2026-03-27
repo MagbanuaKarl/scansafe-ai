@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import { GoogleGenAI } from '@google/genai'
 
 const SYSTEM_INSTRUCTION = `You are an expert Technical Recruiter and ATS (Applicant Tracking System) Specialist. Your tone is blunt, analytical, and strictly factual.
 
@@ -75,30 +75,37 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const genAI = new GoogleGenerativeAI(apiKey)
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-1.5-flash',
-      systemInstruction: SYSTEM_INSTRUCTION,
-    })
+    const ai = new GoogleGenAI({ apiKey })
 
     // Convert file to base64 for inline data
     const fileBuffer = await resumeFile.arrayBuffer()
     const base64Data = Buffer.from(fileBuffer).toString('base64')
 
     // Single-pass: send resume + JD together
-    const result = await model.generateContent([
-      {
-        inlineData: {
-          mimeType: 'application/pdf',
-          data: base64Data,
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      config: {
+        systemInstruction: SYSTEM_INSTRUCTION,
+      },
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              inlineData: {
+                mimeType: 'application/pdf',
+                data: base64Data,
+              },
+            },
+            {
+              text: ANALYSIS_PROMPT(jobDescription),
+            },
+          ],
         },
-      },
-      {
-        text: ANALYSIS_PROMPT(jobDescription),
-      },
-    ])
+      ],
+    })
 
-    const responseText = result.response.text()
+    const responseText = response.text ?? ''
 
     // Strip any accidental markdown code fences
     const cleaned = responseText
@@ -130,7 +137,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error:
-            'Gemini free tier rate limit reached (15 req/min). Wait 60 seconds and try again.',
+            'Gemini free tier rate limit reached. Wait 60 seconds and try again.',
         },
         { status: 429 }
       )
