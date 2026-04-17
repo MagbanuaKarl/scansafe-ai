@@ -38,9 +38,10 @@ const ANALYZING_QUOTES = [
 
 interface LoadingStateProps {
   step: AnalysisStep
+  streaming?: boolean
 }
 
-export default function LoadingState({ step }: LoadingStateProps) {
+export default function LoadingState({ step, streaming }: LoadingStateProps) {
   const [quoteIndex, setQuoteIndex] = useState(0)
   const [dots, setDots] = useState('')
 
@@ -96,7 +97,7 @@ export default function LoadingState({ step }: LoadingStateProps) {
         style={{ color: 'var(--accent)' }}
         key={quoteIndex}
       >
-        {ANALYZING_QUOTES[quoteIndex]}
+        {streaming ? 'Streaming live analysis' : ANALYZING_QUOTES[quoteIndex]}
         {dots}
       </p>
 
@@ -156,9 +157,11 @@ export default function LoadingState({ step }: LoadingStateProps) {
 
       {/* Warning */}
       <p className="text-xs text-center" style={{ color: 'var(--ink-muted)' }}>
-        Gemini 1.5 Flash is analyzing your full document.
+        {streaming
+          ? 'Receiving real-time results from Gemini 2.5 Flash.'
+          : 'Gemini 2.5 Flash is analyzing your full document.'}
         <br />
-        This takes 5–15 seconds on the free tier.
+        {streaming ? 'Streaming active...' : 'This takes 5–15 seconds on the free tier.'}
       </p>
     </div>
   )

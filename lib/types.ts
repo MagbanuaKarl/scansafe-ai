@@ -17,6 +17,9 @@ export interface AnalysisResult {
     impact: number
     clarity: number
   }
+  _metadata?: {
+    used_pdf_fallback: boolean
+  }
 }
 
 export type AnalysisStep =
@@ -27,3 +30,22 @@ export type AnalysisStep =
   | 'rewrites'
   | 'done'
   | 'error'
+
+/** SSE progress event from the streaming API */
+export interface StreamProgress {
+  type: 'progress'
+  step: AnalysisStep
+  partial?: Record<string, unknown>
+}
+
+export interface StreamDone {
+  type: 'done'
+  result: AnalysisResult
+}
+
+export interface StreamError {
+  type: 'error'
+  error: string
+}
+
+export type StreamEvent = StreamProgress | StreamDone | StreamError

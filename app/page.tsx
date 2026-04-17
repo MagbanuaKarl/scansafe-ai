@@ -5,11 +5,11 @@ import { Upload, FileText, Briefcase, Shield, Cpu, Eye, X } from 'lucide-react'
 import LoadingState from '@/components/LoadingState'
 import ResultsDashboard from '@/components/ResultsDashboard'
 import ParsedTextPanel from '@/components/ParsedTextPanel'
-import type { AnalysisResult, AnalysisStep } from '@/lib/types'
+import type { AnalysisResult, AnalysisStep, StreamEvent } from '@/lib/types'
 
 type AppState =
   | { mode: 'input' }
-  | { mode: 'loading'; step: AnalysisStep }
+  | { mode: 'loading'; step: AnalysisStep; streaming: boolean }
   | { mode: 'verify'; parsedResult: AnalysisResult }
   | { mode: 'results'; result: AnalysisResult }
   | { mode: 'error'; message: string }
@@ -37,24 +37,43 @@ export default function HomePage() {
     }
   }
 
+  /** Parse SSE event line from a text chunk */
+  function parseSSEEvent(text: string): StreamEvent | null {
+    const lines = text.split('\n')
+    let eventType = 'message'
+    let dataStr = ''
+
+    for (const line of lines) {
+      if (line.startsWith('event: ')) {
+        eventType = line.slice(7).trim()
+      } else if (line.startsWith('data: ')) {
+        dataStr = line.slice(6).trim()
+      }
+    }
+
+    if (!dataStr) return null
+
+    try {
+      const data = JSON.parse(dataStr)
+      if (eventType === 'progress') {
+        return { type: 'progress', step: data.step, partial: data.partial }
+      }
+      if (eventType === 'done') {
+        return { type: 'done', result: data as AnalysisResult }
+      }
+      if (eventType === 'error') {
+        return { type: 'error', error: data.error }
+      }
+    } catch {
+      return null
+    }
+    return null
+  }
+
   const handleSubmit = async () => {
     if (!resumeFile || !jobDescription.trim()) return
 
-    setAppState({ mode: 'loading', step: 'uploading' })
-
-    // Simulate step progression for UX
-    const stepTimers: { step: AnalysisStep; delay: number }[] = [
-      { step: 'parsing', delay: 1200 },
-      { step: 'analyzing', delay: 2800 },
-      { step: 'rewrites', delay: 5500 },
-    ]
-
-    const timers = stepTimers.map(({ step, delay }) =>
-      setTimeout(
-        () => setAppState({ mode: 'loading', step }),
-        delay
-      )
-    )
+    setAppState({ mode: 'loading', step: 'uploading', streaming: true })
 
     try {
       const formData = new FormData()
@@ -66,19 +85,70 @@ export default function HomePage() {
         body: formData,
       })
 
-      timers.forEach(clearTimeout)
-
-      const data = await response.json()
-
       if (!response.ok) {
-        setAppState({ mode: 'error', message: data.error || 'Analysis failed.' })
+        const errorData = await response.json().catch(() => null)
+        setAppState({
+          mode: 'error',
+          message: errorData?.error || 'Analysis failed.',
+        })
         return
       }
 
-      // Show parsed text verification step first
-      setAppState({ mode: 'verify', parsedResult: data })
+      if (!response.body) {
+        setAppState({
+          mode: 'error',
+          message: 'Streaming not supported. Try again.',
+        })
+        return
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+
+        // SSE events are separated by double newlines
+        const parts = buffer.split('\n\n')
+        buffer = parts.pop() || ''
+
+        for (const part of parts) {
+          if (!part.trim()) continue
+          const event = parseSSEEvent(part)
+          if (!event) continue
+
+          if (event.type === 'progress') {
+            setAppState({
+              mode: 'loading',
+              step: event.step,
+              streaming: true,
+            })
+          } else if (event.type === 'done') {
+            setAppState({
+              mode: 'verify',
+              parsedResult: event.result,
+            })
+            return
+          } else if (event.type === 'error') {
+            setAppState({
+              mode: 'error',
+              message: event.error,
+            })
+            return
+          }
+        }
+      }
+
+      // If stream ended without a 'done' event
+      setAppState({
+        mode: 'error',
+        message: 'Stream ended unexpectedly. Try again.',
+      })
     } catch (err) {
-      timers.forEach(clearTimeout)
       setAppState({
         mode: 'error',
         message: 'Network error. Check your connection and try again.',
@@ -132,7 +202,7 @@ export default function HomePage() {
         <div className="flex items-center gap-5 text-xs" style={{ color: 'var(--ink-muted)' }}>
           <span className="flex items-center gap-1.5">
             <Cpu size={12} style={{ color: 'var(--accent)' }} />
-            Gemini 1.5 Flash
+            Gemini 2.5 Flash
           </span>
           <span className="flex items-center gap-1.5">
             <Eye size={12} style={{ color: 'var(--success)' }} />
@@ -286,7 +356,7 @@ export default function HomePage() {
               {/* Disclaimer */}
               <p className="text-center text-xs" style={{ color: 'var(--ink-muted)' }}>
                 Your resume is processed in-memory and never stored.
-                Analysis uses Gemini 1.5 Flash (free tier: 15 req/min).
+                Analysis uses Gemini 2.5 Flash with live streaming.
               </p>
             </div>
           )}
@@ -294,7 +364,10 @@ export default function HomePage() {
           {/* Loading */}
           {appState.mode === 'loading' && (
             <div className="glass-card">
-              <LoadingState step={appState.step} />
+              <LoadingState
+                step={appState.step}
+                streaming={appState.streaming}
+              />
             </div>
           )}
 
@@ -348,7 +421,7 @@ export default function HomePage() {
         className="text-center py-4 text-xs"
         style={{ color: 'var(--ink-muted)', borderTop: '1px solid var(--border)' }}
       >
-        ScanSafe AI — Glass-box resume analysis. Built with Next.js + Gemini 1.5 Flash.
+        ScanSafe AI — Glass-box resume analysis. Built with Next.js + Gemini 2.5 Flash.
       </footer>
     </div>
   )
